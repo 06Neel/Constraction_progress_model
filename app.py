@@ -1,7 +1,5 @@
 import streamlit as st
 import tensorflow as tf
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Dense, GlobalAveragePooling2D, Dropout
 from tensorflow.keras.preprocessing.image import img_to_array, load_img
 from skimage.metrics import structural_similarity as ssim
 import numpy as np
@@ -9,22 +7,9 @@ import cv2
 import matplotlib.pyplot as plt
 from io import BytesIO
 
-# Load the model
+# Load the pre-trained model
 def load_model():
-    base_model = tf.keras.applications.MobileNetV2(input_shape=(224, 224, 3), include_top=False, weights='imagenet')
-    base_model.trainable = False
-
-    model = Sequential([
-        base_model,
-        GlobalAveragePooling2D(),
-        Dense(256, activation='relu'),
-        Dropout(0.5),
-        Dense(1, activation='sigmoid')
-    ])
-
-    model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=0.001),
-                  loss='binary_crossentropy',
-                  metrics=['accuracy'])
+    model = tf.keras.models.load_model('path_to_your_model.h5')
     return model
 
 model = load_model()
@@ -58,13 +43,10 @@ if uploaded_img1 and uploaded_img2:
     img1_array = img_to_array(load_img(uploaded_img1, target_size=(224, 224)))
     img2_array = img_to_array(load_img(uploaded_img2, target_size=(224, 224)))
 
-    img1_gray = cv2.cvtColor(img1_array, cv2.COLOR_RGB2GRAY)
-    img2_gray = cv2.cvtColor(img2_array, cv2.COLOR_RGB2GRAY)
+    img1_gray = cv2.cvtColor(img1_array.astype('uint8'), cv2.COLOR_RGB2GRAY)
+    img2_gray = cv2.cvtColor(img2_array.astype('uint8'), cv2.COLOR_RGB2GRAY)
 
-    if img1_gray.max() - img1_gray.min() == 255:
-        data_range = 255
-    else:
-        data_range = img1_gray.max() - img1_gray.min()
+    data_range = 255
 
     similarity_index, _ = ssim(img1_gray, img2_gray, data_range=data_range, full=True)
     
