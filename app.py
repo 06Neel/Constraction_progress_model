@@ -17,7 +17,7 @@ def load_model():
     model = Sequential([
         base_model,
         GlobalAveragePooling2D(),
-        Dense(256, activation='relu'),
+        Dense(500, activation='relu'),
         Dropout(0.5),
         Dense(1, activation='sigmoid')
     ])
