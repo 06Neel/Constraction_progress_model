@@ -1,18 +1,16 @@
+import streamlit as st
 import tensorflow as tf
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Dense, GlobalAveragePooling2D, Dropout
-from tensorflow.keras.preprocessing.image import ImageDataGenerator
-import numpy as np
-import matplotlib.pyplot as plt
-import cv2
+from tensorflow.keras.preprocessing.image import img_to_array, load_img
 from skimage.metrics import structural_similarity as ssim
-import streamlit as st
-from PIL import Image
+import numpy as np
+import cv2
+import matplotlib.pyplot as plt
+from io import BytesIO
 
-# Model loading function
-@st.cache(allow_output_mutation=True)
+# Load the model
 def load_model():
-    # Model architecture using a pre-trained model (Transfer Learning)
     base_model = tf.keras.applications.MobileNetV2(input_shape=(224, 224, 3), include_top=False, weights='imagenet')
     base_model.trainable = False
 
@@ -23,73 +21,86 @@ def load_model():
         Dropout(0.5),
         Dense(1, activation='sigmoid')
     ])
-    # Load trained weights (replace 'model.h5' with your trained model path if needed)
+
     model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=0.001),
                   loss='binary_crossentropy',
                   metrics=['accuracy'])
     return model
 
-# For inference on a new image
-def classify_image(image, model):
-    img_size = (224, 224)
-    img = image.resize(img_size)
-    img_array = np.array(img) / 255.0
-    img_array = np.expand_dims(img_array, axis=0)  # Create a batch
-    prediction = model.predict(img_array)[0][0]
-    class_name = "Developed" if prediction > 0.5 else "Underdeveloped"
-    confidence = abs(prediction - 0.5) * 200
-    return class_name, confidence, prediction
+model = load_model()
 
-# New function to compare construction progress with visual output
-def compare_construction_progress(image1, image2, model):
-    # Classify both images
-    class1, confidence1, prediction1 = classify_image(image1, model)
-    class2, confidence2, prediction2 = classify_image(image2, model)
+# Streamlit app
+st.title('Construction Activity Assessment')
 
-    st.write("Comparison results:")
-    if class1 == class2:
-        st.write(f"Both images are classified as {class1}")
-        # Calculate structural similarity
-        img1_gray = cv2.cvtColor(np.array(image1), cv2.COLOR_RGB2GRAY)
-        img2_gray = cv2.cvtColor(np.array(image2), cv2.COLOR_RGB2GRAY)
-        similarity_index, _ = ssim(img1_gray, img2_gray, full=True)
+st.sidebar.header('Upload Images')
+uploaded_img1 = st.sidebar.file_uploader("Upload Image 1", type=["png", "jpg", "jpeg"])
+uploaded_img2 = st.sidebar.file_uploader("Upload Image 2 (for comparison)", type=["png", "jpg", "jpeg"])
+
+if uploaded_img1 and uploaded_img2:
+    def classify_image(image):
+        img = load_img(image, target_size=(224, 224))
+        img_array = img_to_array(img) / 255.0
+        img_array = np.expand_dims(img_array, 0)
+        prediction = model.predict(img_array)[0][0]
+        class_name = "Developed" if prediction > 0.5 else "Underdeveloped"
+        confidence = abs(prediction - 0.5) * 200
+        return class_name, confidence, prediction
+    
+    # Load and classify images
+    img1_class, img1_conf, img1_pred = classify_image(uploaded_img1)
+    img2_class, img2_conf, img2_pred = classify_image(uploaded_img2)
+
+    # Display images and classifications
+    st.image(uploaded_img1, caption=f"Image 1: {img1_class} (Confidence: {img1_conf:.2f}%)", use_column_width=True)
+    st.image(uploaded_img2, caption=f"Image 2: {img2_class} (Confidence: {img2_conf:.2f}%)", use_column_width=True)
+
+    # Compare construction progress
+    img1_array = img_to_array(load_img(uploaded_img1, target_size=(224, 224)))
+    img2_array = img_to_array(load_img(uploaded_img2, target_size=(224, 224)))
+
+    img1_gray = cv2.cvtColor(img1_array, cv2.COLOR_RGB2GRAY)
+    img2_gray = cv2.cvtColor(img2_array, cv2.COLOR_RGB2GRAY)
+
+    if img1_gray.max() - img1_gray.min() == 255:
+        data_range = 255
+    else:
+        data_range = img1_gray.max() - img1_gray.min()
+
+    similarity_index, _ = ssim(img1_gray, img2_gray, data_range=data_range, full=True)
+    
+    if img1_class == img2_class:
         st.write(f"Structural Similarity Index: {similarity_index:.2f}")
         if similarity_index > 0.8:
             st.write("The images are very similar, suggesting little to no progress between them.")
         else:
             st.write("The images show some differences, suggesting some progress or changes.")
     else:
-        st.write("The images are classified differently.")
-        developed_confidence = confidence1 if class1 == "Developed" else confidence2
-        underdeveloped_confidence = confidence2 if class1 == "Developed" else confidence1
+        developed_confidence = img1_conf if img1_class == "Developed" else img2_conf
+        underdeveloped_confidence = img2_conf if img1_class == "Developed" else img1_conf
         progress = (underdeveloped_confidence / developed_confidence) * 100
-        underdeveloped_image = "Image 2" if class1 == "Developed" else "Image 1"
+        underdeveloped_image = "Image 2" if img1_class == "Developed" else "Image 1"
         st.write(f"{underdeveloped_image} (Underdeveloped) is approximately {progress:.2f}% complete compared to the Developed image.")
     
     # Calculate overall progress based on model predictions
-    overall_progress = (prediction1 + prediction2) / 2 * 100
-    st.write(f"\nOverall estimated progress of the construction site: {overall_progress:.2f}%")
+    overall_progress = (img1_pred + img2_pred) / 2 * 100
+    st.write(f"Overall estimated progress of the construction site: {overall_progress:.2f}%")
 
-    # Display images with classification results
-    #st.image(image1, caption=f"Image 1: {class1} ({confidence1:.2f}% confidence)", use_column_width=True)
-    #st.image(image2, caption=f"Image 2: {class2} ({confidence2:.2f}% confidence)", use_column_width=True)
+    # Plot comparison results
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 6))
+    
+    ax1.imshow(img1_array / 255.0)
+    ax1.set_title(f"Image 1: {img1_class}\nConfidence: {img1_conf:.2f}%")
+    ax1.axis('off')
+    
+    ax2.imshow(img2_array / 255.0)
+    ax2.set_title(f"Image 2: {img2_class}\nConfidence: {img2_conf:.2f}%")
+    ax2.axis('off')
+    
+    plt.suptitle(f"Construction Progress Comparison: {overall_progress:.2f}%\n", fontsize=16)
+    st.pyplot(fig)
 
-# Streamlit application starts here
-st.title("Construction Site Development Classifier")
+elif uploaded_img1 or uploaded_img2:
+    st.error("Please upload both images for comparison.")
 
-# Load the model
-model = load_model()
-
-st.write("Upload two images to compare construction progress")
-
-# Allow upload of multiple file types (png, jpg, jpeg)
-uploaded_file1 = st.file_uploader("Choose the first image...", type=["png", "jpg", "jpeg"])
-uploaded_file2 = st.file_uploader("Choose the second image...", type=["png", "jpg", "jpeg"])
-
-if uploaded_file1 is not None and uploaded_file2 is not None:
-    # Convert uploaded files to PIL Image
-    image1 = Image.open(uploaded_file1)
-    image2 = Image.open(uploaded_file2)
-
-    # Compare construction progress between the two images
-    compare_construction_progress(image1, image2, model)
+else:
+    st.warning("Upload images to proceed.")
